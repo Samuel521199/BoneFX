@@ -7,6 +7,7 @@ import { Timeline } from './Timeline';
 import { AssetPanel } from './AssetPanel';
 import { PreviewPanel } from './PreviewPanel';
 import { BoneFXRenderer } from '../../core/renderer/Renderer';
+import { AssetViewer } from './AssetViewer';
 
 const theme = createTheme({
     palette: {
@@ -52,7 +53,10 @@ export const Editor: React.FC = () => {
                 <EditorLayout
                     toolbar={<Toolbar />}
                     preview={
-                        <Box ref={previewRef} sx={{ width: '100%', height: '100%' }} />
+                        <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+                            <Box ref={previewRef} sx={{ flex: 1, width: '100%' }} />
+                            <AssetViewer />
+                        </Box>
                     }
                     propertyPanel={<PropertyPanel />}
                     timeline={<Timeline />}

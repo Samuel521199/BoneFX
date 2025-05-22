@@ -14,7 +14,9 @@
     "docs": "typedoc --out docs/api src/index.ts",
     "build:unity": "tsc -p tsconfig.unity.json",
     "build:unreal": "tsc -p tsconfig.unreal.json",
-    "download-model": "node scripts/download-model.js"
+    "download-model": "node scripts/download-model.js",
+    "setup-wasm": "node scripts/setup-wasm.js",
+    "setup": "npm run download-model && npm run setup-wasm"
   },
   "dependencies": {
     "@emotion/react": "^11.10.6",

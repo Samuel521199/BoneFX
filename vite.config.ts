@@ -6,6 +6,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './src'),
       '@core': path.resolve(__dirname, './src/core'),
       '@ai': path.resolve(__dirname, './src/ai'),
       '@animation': path.resolve(__dirname, './src/animation'),
@@ -14,9 +15,15 @@ export default defineConfig({
       '@editor': path.resolve(__dirname, './src/editor'),
     },
   },
+  optimizeDeps: {
+    needsInterop: ['onnxruntime-web'],
+  },
   server: {
     port: 3000,
     open: true,
+    fs: {
+      strict: false,
+    },
   },
   build: {
     outDir: 'dist',
@@ -27,8 +34,10 @@ export default defineConfig({
           'vendor': ['react', 'react-dom', 'three'],
           'editor': ['@mui/material', '@mui/icons-material'],
           'animation': ['konva', 'react-konva'],
+          'onnxruntime': ['onnxruntime-web'],
         },
       },
     },
   },
+  publicDir: 'public',
 }); 

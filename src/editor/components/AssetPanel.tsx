@@ -1,4 +1,4 @@
-import React, { useCallback } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
     Box,
     Typography,
@@ -12,6 +12,16 @@ import {
     Button,
     CircularProgress,
     Tooltip,
+    Menu,
+    MenuItem,
+    Slider,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    FormControl,
+    InputLabel,
+    Select,
 } from '@mui/material';
 import {
     Image as ImageIcon,
@@ -20,121 +30,167 @@ import {
     Add as AddIcon,
     Delete as DeleteIcon,
     Transform as TransformIcon,
+    Settings as SettingsIcon,
+    Visibility as VisibilityIcon,
 } from '@mui/icons-material';
 import { ParallaxMapGenerator } from '../../core/utils/ParallaxMapGenerator';
+import { useAssetStore } from '../../stores/assetStore';
 
 interface Asset {
     id: string;
     name: string;
-    type: 'image' | 'video' | 'audio';
-    path: string;
-    parallaxMaps?: {
-        diffuseMap: string;
-        depthMap: string;
-        normalMap: string;
-    };
+    type: 'image' | 'video' | 'audio' | 'depth' | 'normal';
+    url: string;
+    parallaxMapUrl?: string;
 }
 
-const mockAssets: Asset[] = [
-    { id: '1', name: 'character.png', type: 'image', path: '/assets/character.png' },
-    { id: '2', name: 'background.jpg', type: 'image', path: '/assets/background.jpg' },
-    { id: '3', name: 'effect.mp4', type: 'video', path: '/assets/effect.mp4' },
-    { id: '4', name: 'music.mp3', type: 'audio', path: '/assets/music.mp3' },
-];
+// 文件转 base64
+function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = e => resolve(e.target?.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
 
 export const AssetPanel: React.FC = () => {
-    const parallaxGenerator = React.useRef<ParallaxMapGenerator>(new ParallaxMapGenerator());
-    const [assets, setAssets] = React.useState<Asset[]>(mockAssets);
+    const parallaxGenerator = React.useRef<ParallaxMapGenerator | null>(null);
     const [isGenerating, setIsGenerating] = React.useState(false);
     const [generatingAssetId, setGeneratingAssetId] = React.useState<string | null>(null);
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const [settingsAnchorEl, setSettingsAnchorEl] = React.useState<null | HTMLElement>(null);
+    const [settingsOpen, setSettingsOpen] = React.useState(false);
+    const [quality, setQuality] = React.useState<'low' | 'medium' | 'high'>('medium');
+    const [normalStrength, setNormalStrength] = React.useState(5.0);
+    const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+    const [previewOpen, setPreviewOpen] = useState(false);
+    const [previewAsset, setPreviewAsset] = useState<Asset | null>(null);
+    const { assets, addAsset, removeAsset, updateAsset, selectAsset, setAssets } = useAssetStore();
 
-    React.useEffect(() => {
-        parallaxGenerator.current.initialize();
-        return () => {
-            parallaxGenerator.current.dispose();
-        };
+    // 页面加载时恢复 localStorage
+    useEffect(() => {
+        const saved = localStorage.getItem('assets');
+        if (saved) {
+            try {
+                const parsed: Asset[] = JSON.parse(saved);
+                setAssets(parsed);
+            } catch {}
+        }
+        // eslint-disable-next-line
     }, []);
 
-    const handleFileSelect = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    // 每次 assets 变化时同步 localStorage
+    useEffect(() => {
+        localStorage.setItem('assets', JSON.stringify(assets));
+    }, [assets]);
+
+    const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
         const files = event.target.files;
         if (!files) return;
 
-        const newAssets: Asset[] = Array.from(files).map((file) => {
-            const type = file.type.startsWith('image/') ? 'image' :
-                        file.type.startsWith('video/') ? 'video' : 'audio';
-            
-            return {
-                id: Math.random().toString(36).substr(2, 9),
-                name: file.name,
-                type,
-                path: URL.createObjectURL(file),
-            };
-        });
-
-        setAssets(prev => [...prev, ...newAssets]);
-        
-        // 重置文件输入框的值，这样相同的文件可以再次被选择
-        if (fileInputRef.current) {
-            fileInputRef.current.value = '';
+        for (const file of Array.from(files)) {
+            if (file.type.startsWith('image/')) {
+                const base64 = await fileToBase64(file);
+                const asset: Asset = {
+                    id: Date.now().toString() + Math.random().toString(36).slice(2),
+                    name: file.name,
+                    type: 'image',
+                    url: base64,
+                };
+                addAsset(asset);
+            }
         }
-    }, []);
+    };
 
-    const handleAddClick = useCallback(() => {
+    const handleAddClick = () => {
         fileInputRef.current?.click();
-    }, []);
+    };
 
-    const handleDeleteAsset = useCallback((assetId: string) => {
+    const handleDeleteAsset = (assetId: string) => {
         setAssets(prevAssets => {
             const asset = prevAssets.find(a => a.id === assetId);
             if (asset) {
                 // 释放资源URL
-                URL.revokeObjectURL(asset.path);
-                if (asset.parallaxMaps) {
-                    URL.revokeObjectURL(asset.parallaxMaps.diffuseMap);
-                    URL.revokeObjectURL(asset.parallaxMaps.depthMap);
-                    URL.revokeObjectURL(asset.parallaxMaps.normalMap);
+                URL.revokeObjectURL(asset.url);
+                if (asset.parallaxMapUrl) {
+                    URL.revokeObjectURL(asset.parallaxMapUrl);
                 }
             }
             return prevAssets.filter(a => a.id !== assetId);
         });
-    }, []);
+    };
 
-    const handleGenerateParallaxMap = useCallback(async (asset: Asset) => {
-        if (asset.type !== 'image' || isGenerating) return;
+    const handleSettingsClick = (event: React.MouseEvent<HTMLElement>) => {
+        setSettingsAnchorEl(event.currentTarget);
+        setSettingsOpen(true);
+    };
 
+    const handleSettingsClose = () => {
+        setSettingsAnchorEl(null);
+        setSettingsOpen(false);
+    };
+
+    const handleQualityChange = (event: React.ChangeEvent<{ value: unknown }>) => {
+        const newQuality = event.target.value as 'low' | 'medium' | 'high';
+        setQuality(newQuality);
+        parallaxGenerator.current?.setQuality(newQuality);
+    };
+
+    const handleNormalStrengthChange = (event: Event, newValue: number | number[]) => {
+        const strength = newValue as number;
+        setNormalStrength(strength);
+        parallaxGenerator.current?.setNormalStrength(strength);
+    };
+
+    const handleGenerateParallaxMap = async (asset: Asset) => {
+        if (!parallaxGenerator.current) {
+            parallaxGenerator.current = new ParallaxMapGenerator();
+        }
+        setIsGenerating(true);
+        setGeneratingAssetId(asset.id);
         try {
-            setIsGenerating(true);
-            setGeneratingAssetId(asset.id);
-            
-            const maps = await parallaxGenerator.current.generateParallaxMap(asset.path);
-            
-            // 将生成的贴图转换为URL
-            const diffuseUrl = URL.createObjectURL(new Blob([maps.diffuseMap.data], { type: 'image/png' }));
-            const depthUrl = URL.createObjectURL(new Blob([maps.depthMap.data], { type: 'image/png' }));
-            const normalUrl = URL.createObjectURL(new Blob([maps.normalMap.data], { type: 'image/png' }));
-
-            // 更新资产
-            setAssets(prevAssets => prevAssets.map(a => 
-                a.id === asset.id
-                    ? {
-                        ...a,
-                        parallaxMaps: {
-                            diffuseMap: diffuseUrl,
-                            depthMap: depthUrl,
-                            normalMap: normalUrl,
-                        },
-                    }
-                    : a
-            ));
+            const image = new window.Image();
+            image.src = asset.url;
+            await new Promise((resolve) => {
+                image.onload = resolve;
+            });
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width;
+            canvas.height = image.height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) throw new Error('无法创建画布上下文');
+            ctx.drawImage(image, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const depthMap = await parallaxGenerator.current.generateDepthMap(imageData);
+            const depthMapUrl = URL.createObjectURL(
+                new Blob([depthMap.data], { type: 'image/png' })
+            );
+            updateAsset(asset.id, {
+                ...asset,
+                parallaxMapUrl: depthMapUrl
+            });
         } catch (error) {
-            console.error('Failed to generate parallax map:', error);
-            alert('生成视差贴图失败，请重试');
+            console.error('生成视差贴图失败:', error);
         } finally {
             setIsGenerating(false);
             setGeneratingAssetId(null);
         }
-    }, [isGenerating]);
+    };
+
+    const handlePreview = (asset: Asset) => {
+        setPreviewAsset(asset);
+        setPreviewOpen(true);
+    };
+
+    const handleClosePreview = () => {
+        setPreviewOpen(false);
+        setPreviewAsset(null);
+    };
+
+    const handleAssetClick = (asset: Asset) => {
+        selectAsset(asset);
+    };
 
     const getAssetIcon = (type: Asset['type']) => {
         switch (type) {
@@ -154,7 +210,7 @@ export const AssetPanel: React.FC = () => {
                 type="file"
                 ref={fileInputRef}
                 style={{ display: 'none' }}
-                onChange={handleFileSelect}
+                onChange={handleFileUpload}
                 accept="image/*,video/*,audio/*"
                 multiple
             />
@@ -169,9 +225,14 @@ export const AssetPanel: React.FC = () => {
                 }}
             >
                 <Typography variant="h6">资源</Typography>
-                <IconButton size="small" onClick={handleAddClick}>
-                    <AddIcon />
-                </IconButton>
+                <Box>
+                    <IconButton size="small" onClick={handleSettingsClick}>
+                        <SettingsIcon />
+                    </IconButton>
+                    <IconButton size="small" onClick={handleAddClick}>
+                        <AddIcon />
+                    </IconButton>
+                </Box>
             </Box>
 
             <Divider />
@@ -181,9 +242,11 @@ export const AssetPanel: React.FC = () => {
                 {assets.map((asset) => (
                     <ListItem
                         key={asset.id}
+                        selected={selectedAsset?.id === asset.id}
+                        onClick={() => handleAssetClick(asset)}
                         secondaryAction={
                             <Box>
-                                {asset.type === 'image' && !asset.parallaxMaps && (
+                                {asset.type === 'image' && !asset.parallaxMapUrl && (
                                     <Tooltip title="生成视差贴图">
                                         <IconButton
                                             edge="end"
@@ -218,7 +281,7 @@ export const AssetPanel: React.FC = () => {
                             <ListItemText
                                 primary={asset.name}
                                 secondary={
-                                    asset.parallaxMaps
+                                    asset.parallaxMapUrl
                                         ? '已生成视差贴图'
                                         : asset.type
                                 }
@@ -227,6 +290,77 @@ export const AssetPanel: React.FC = () => {
                     </ListItem>
                 ))}
             </List>
+
+            {/* 设置对话框 */}
+            <Dialog open={settingsOpen} onClose={handleSettingsClose}>
+                <DialogTitle>视差贴图设置</DialogTitle>
+                <DialogContent>
+                    <Box sx={{ mt: 2 }}>
+                        <FormControl fullWidth sx={{ mb: 2 }}>
+                            <InputLabel>生成质量</InputLabel>
+                            <Select
+                                value={quality}
+                                label="生成质量"
+                                onChange={handleQualityChange}
+                            >
+                                <MenuItem value="low">低（快速）</MenuItem>
+                                <MenuItem value="medium">中（平衡）</MenuItem>
+                                <MenuItem value="high">高（精细）</MenuItem>
+                            </Select>
+                        </FormControl>
+                        <Typography gutterBottom>法线贴图强度</Typography>
+                        <Slider
+                            value={normalStrength}
+                            onChange={handleNormalStrengthChange}
+                            min={1}
+                            max={10}
+                            step={0.1}
+                            marks
+                            valueLabelDisplay="auto"
+                        />
+                    </Box>
+                </DialogContent>
+                <DialogActions>
+                    <Button onClick={handleSettingsClose}>确定</Button>
+                </DialogActions>
+            </Dialog>
+
+            <Dialog
+                open={previewOpen}
+                onClose={handleClosePreview}
+                maxWidth="md"
+                fullWidth
+            >
+                <DialogTitle>预览</DialogTitle>
+                <DialogContent>
+                    {previewAsset && (
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                            <Box>
+                                <Typography variant="subtitle1">原始图片</Typography>
+                                <img
+                                    src={previewAsset.url}
+                                    alt={previewAsset.name}
+                                    style={{ maxWidth: '100%', height: 'auto' }}
+                                    onError={e => {
+                                        (e.target as HTMLImageElement).src = '';
+                                        alert('图片加载失败，base64数据有误');
+                                    }}
+                                />
+                            </Box>
+                            {previewAsset.parallaxMapUrl && (
+                                <Box>
+                                    <Typography variant="subtitle1">视差贴图</Typography>
+                                    <img
+                                        src={previewAsset.parallaxMapUrl}
+                                        alt={`${previewAsset.name} - 视差贴图`}
+                                        style={{ maxWidth: '100%', height: 'auto' }}
+                                    />
+                                </Box>
+                            )}
+                        </Box>
+                    )}
+                </DialogContent>
+            </Dialog>
         </Box>
     );
 }; 
