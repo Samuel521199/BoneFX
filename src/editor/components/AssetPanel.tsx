@@ -99,6 +99,7 @@ export const AssetPanel: React.FC = () => {
                     url: base64,
                 };
                 addAsset(asset);
+                console.log('添加图片资源:', asset);
             }
         }
     };
@@ -144,37 +145,35 @@ export const AssetPanel: React.FC = () => {
     };
 
     const handleGenerateParallaxMap = async (asset: Asset) => {
+        console.log('点击生成视差贴图', asset);
         if (!parallaxGenerator.current) {
             parallaxGenerator.current = new ParallaxMapGenerator();
         }
         setIsGenerating(true);
         setGeneratingAssetId(asset.id);
         try {
-            const image = new window.Image();
-            image.src = asset.url;
-            await new Promise((resolve) => {
-                image.onload = resolve;
-            });
+            const { depthMap } = await parallaxGenerator.current.generateParallaxMap(asset.url);
+            // 将 ImageData 转为 PNG Blob
             const canvas = document.createElement('canvas');
-            canvas.width = image.width;
-            canvas.height = image.height;
+            canvas.width = depthMap.width;
+            canvas.height = depthMap.height;
             const ctx = canvas.getContext('2d');
             if (!ctx) throw new Error('无法创建画布上下文');
-            ctx.drawImage(image, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const depthMap = await parallaxGenerator.current.generateDepthMap(imageData);
-            const depthMapUrl = URL.createObjectURL(
-                new Blob([depthMap.data], { type: 'image/png' })
-            );
+            ctx.putImageData(depthMap, 0, 0);
+            const blob: Blob = await new Promise(resolve => canvas.toBlob(blob => resolve(blob!), 'image/png'));
+            const depthMapUrl = URL.createObjectURL(blob);
             updateAsset(asset.id, {
                 ...asset,
                 parallaxMapUrl: depthMapUrl
             });
+            alert('视差贴图生成成功！');
         } catch (error) {
             console.error('生成视差贴图失败:', error);
+            alert('生成视差贴图失败: ' + (error instanceof Error ? error.message : error));
         } finally {
             setIsGenerating(false);
             setGeneratingAssetId(null);
+            console.log('生成结束');
         }
     };
 
@@ -213,6 +212,8 @@ export const AssetPanel: React.FC = () => {
                 onChange={handleFileUpload}
                 accept="image/*,video/*,audio/*"
                 multiple
+                id="asset-upload"
+                aria-label="导入图片"
             />
 
             {/* 标题栏 */}
@@ -250,9 +251,9 @@ export const AssetPanel: React.FC = () => {
                                     <Tooltip title="生成视差贴图">
                                         <IconButton
                                             edge="end"
-                                            size="small"
                                             onClick={() => handleGenerateParallaxMap(asset)}
                                             disabled={isGenerating}
+                                            aria-label="生成视差贴图"
                                         >
                                             {generatingAssetId === asset.id ? (
                                                 <CircularProgress size={24} />
@@ -262,12 +263,20 @@ export const AssetPanel: React.FC = () => {
                                         </IconButton>
                                     </Tooltip>
                                 )}
-                                <Tooltip title="删除资源">
+                                <Tooltip title="预览">
                                     <IconButton
                                         edge="end"
-                                        size="small"
+                                        onClick={() => handlePreview(asset)}
+                                        aria-label="预览"
+                                    >
+                                        <VisibilityIcon />
+                                    </IconButton>
+                                </Tooltip>
+                                <Tooltip title="删除">
+                                    <IconButton
+                                        edge="end"
                                         onClick={() => handleDeleteAsset(asset.id)}
-                                        disabled={isGenerating}
+                                        aria-label="删除"
                                     >
                                         <DeleteIcon />
                                     </IconButton>
